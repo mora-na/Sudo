@@ -6,6 +6,15 @@ on:
       - main
       - master
   workflow_dispatch:
+    inputs:
+      build_windows_arm:
+        description: "Build Windows ARM64 (requires a custom JavaFX SDK URL)"
+        required: false
+        default: "false"
+      windows_arm_javafx_url:
+        description: "Direct URL to a Windows ARM64 JavaFX SDK zip"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -30,9 +39,9 @@ jobs:
             platform: windows
             arch: x64
             javafx_platform: windows-x64
-            package_type: exe
+            package_type: app-image
             icon: sudoku_icon.ico
-            ext: exe
+            ext: zip
           - runner: macos-15-intel
             platform: macos
             arch: x64
@@ -69,12 +78,18 @@ jobs:
         shell: bash
         env:
           JAVAFX_PLATFORM: ${{ matrix.javafx_platform }}
+          JAVAFX_SDK_URL: ${{ github.event.inputs.windows_arm_javafx_url }}
         run: |
           set -euo pipefail
           base="https://download2.gluonhq.com/openjfx/${JAVAFX_VERSION}"
           dest="build/javafx"
           mkdir -p "$dest"
 
+          if [[ -n "${JAVAFX_SDK_URL:-}" ]]; then
+            url="$JAVAFX_SDK_URL"
+            echo "Downloading JavaFX SDK from $url"
+            curl -fL "$url" -o "$dest/javafx.zip"
+          else
           candidates=()
           if [[ "$JAVAFX_PLATFORM" == osx-* ]]; then
             arch="${JAVAFX_PLATFORM#osx-}"
@@ -97,6 +112,7 @@ jobs:
           if [[ -z "$downloaded" ]]; then
             echo "Failed to download JavaFX SDK for $JAVAFX_PLATFORM"
             exit 1
+          fi
           fi
 
           if command -v unzip >/dev/null 2>&1; then
@@ -126,12 +142,26 @@ jobs:
         run: |
           set -euo pipefail
           pkg_dir="build/installer"
+          mkdir -p dist
+          if [[ -d "$pkg_dir/$APP_NAME.app" ]]; then
+            base="$APP_NAME.app"
+          elif [[ -d "$pkg_dir/$APP_NAME" ]]; then
+            base="$APP_NAME"
+          else
+            base=""
+          fi
+
+          if [[ -n "$base" ]]; then
+            out="dist/${APP_NAME}-${APP_VERSION}-${{ matrix.platform }}-${{ matrix.arch }}.zip"
+            tar -a -cf "$out" -C "$pkg_dir" "$base"
+            exit 0
+          fi
+
           file=$(ls "$pkg_dir" | grep -E "\\.${{ matrix.ext }}$" | head -n 1)
           if [[ -z "$file" ]]; then
             echo "No package found in $pkg_dir"
             exit 1
           fi
-          mkdir -p dist
           cp "$pkg_dir/$file" "dist/${APP_NAME}-${APP_VERSION}-${{ matrix.platform }}-${{ matrix.arch }}.${{ matrix.ext }}"
 
       - name: Upload artifact
@@ -158,3 +188,74 @@ jobs:
           name: Nightly build
           prerelease: true
           files: dist/*
+
+  build_windows_arm:
+    name: Build windows arm64
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_windows_arm == 'true' }}
+    runs-on: windows-11-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Download JavaFX SDK (Windows ARM64)
+        shell: bash
+        env:
+          JAVAFX_SDK_URL: ${{ inputs.windows_arm_javafx_url }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${JAVAFX_SDK_URL:-}" ]]; then
+            echo "windows_arm_javafx_url is required for Windows ARM64 builds."
+            exit 1
+          fi
+          dest="build/javafx"
+          mkdir -p "$dest"
+          echo "Downloading JavaFX SDK from $JAVAFX_SDK_URL"
+          curl -fL "$JAVAFX_SDK_URL" -o "$dest/javafx.zip"
+          if command -v unzip >/dev/null 2>&1; then
+            unzip -q "$dest/javafx.zip" -d "$dest"
+          else
+            7z x "$dest/javafx.zip" "-o$dest" > /dev/null
+          fi
+          sdk_dir=$(find "$dest" -maxdepth 1 -type d -name "javafx-sdk-*")
+          if [[ -z "$sdk_dir" ]]; then
+            echo "JavaFX SDK not found after unzip"
+            exit 1
+          fi
+          echo "JAVAFX_SDK_DIR=$sdk_dir" >> "$GITHUB_ENV"
+
+      - name: Package app
+        shell: bash
+        env:
+          PACKAGE_TYPE: app-image
+          PACKAGE_ICON: sudoku_icon.ico
+          PACKAGE_DESCRIPTION: "Sudoku Game for windows arm64"
+        run: |
+          chmod +x scripts/ci/build-package.sh
+          scripts/ci/build-package.sh
+
+      - name: Collect artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg_dir="build/installer"
+          mkdir -p dist
+          if [[ -d "$pkg_dir/$APP_NAME" ]]; then
+            base="$APP_NAME"
+          else
+            echo "No app image found in $pkg_dir"
+            exit 1
+          fi
+          out="dist/${APP_NAME}-${APP_VERSION}-windows-arm64.zip"
+          tar -a -cf "$out" -C "$pkg_dir" "$base"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64
+          path: dist/*
