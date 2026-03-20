@@ -34,6 +34,19 @@ if [[ ! -x "$JAVAC" || ! -x "$JPACKAGE" ]]; then
   exit 1
 fi
 
+PATH_SEP=":"
+to_native_path() {
+  printf "%s" "$1"
+}
+if [[ "${OSTYPE:-}" == "msys"* || "${OSTYPE:-}" == "cygwin"* ]]; then
+  PATH_SEP=";"
+  if command -v cygpath >/dev/null 2>&1; then
+    to_native_path() {
+      cygpath -w "$1"
+    }
+  fi
+fi
+
 JAVAFX_LIB_DIR="${JAVAFX_LIB_DIR:-}"
 if [[ -z "$JAVAFX_LIB_DIR" ]]; then
   if [[ -n "$JAVAFX_SDK_DIR" && -d "$JAVAFX_SDK_DIR" ]]; then
@@ -102,8 +115,13 @@ EOF
 
 "$JAR" --create --file "$MLIB_DIR/$APP_NAME.jar" -C "$MODS_DIR/$MODULE_NAME" .
 
+MLIB_DIR_NATIVE="$(to_native_path "$MLIB_DIR")"
+JAVA_JMODS_NATIVE="$(to_native_path "$JAVA_HOME/jmods")"
+JAVAFX_LIB_NATIVE="$(to_native_path "$JAVAFX_LIB_DIR")"
+JLINK_MODULE_PATH="${MLIB_DIR_NATIVE}${PATH_SEP}${JAVA_JMODS_NATIVE}${PATH_SEP}${JAVAFX_LIB_NATIVE}"
+
 "$JLINK" \
-  --module-path "$MLIB_DIR:$JAVA_HOME/jmods:$JAVAFX_LIB_DIR" \
+  --module-path "$JLINK_MODULE_PATH" \
   --add-modules "$MODULE_NAME,javafx.controls,javafx.fxml,javafx.graphics" \
   --output "$IMAGE_DIR" \
   --launcher "$APP_NAME=$MODULE_NAME/$MAIN_CLASS" \
