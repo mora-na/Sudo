@@ -63,8 +63,8 @@ IMAGE_DIR="$BUILD_DIR/image"
 TMP_SRC="$BUILD_DIR/tmp_src"
 PKG_DIR="$BUILD_DIR/installer"
 
-rm -rf "$BUILD_DIR"
-mkdir -p "$MODS_DIR" "$MLIB_DIR" "$IMAGE_DIR" "$TMP_SRC" "$PKG_DIR"
+rm -rf "$MODS_DIR" "$MLIB_DIR" "$IMAGE_DIR" "$TMP_SRC" "$PKG_DIR"
+mkdir -p "$MODS_DIR" "$MLIB_DIR" "$TMP_SRC" "$PKG_DIR"
 
 mkdir -p "$TMP_SRC/$MODULE_NAME"
 cp -R "$SRC_DIR/." "$TMP_SRC/$MODULE_NAME/"
@@ -99,6 +99,39 @@ EOF
   --compress=2 \
   --no-header-files \
   --no-man-pages
+
+JAVAFX_NATIVE_DIRS=()
+if [[ -d "$JAVAFX_LIB_DIR" ]]; then
+  JAVAFX_NATIVE_DIRS+=("$JAVAFX_LIB_DIR")
+fi
+if [[ -d "$JAVAFX_SDK_DIR/bin" ]]; then
+  JAVAFX_NATIVE_DIRS+=("$JAVAFX_SDK_DIR/bin")
+fi
+
+NATIVE_TARGET_DIR="$IMAGE_DIR/lib"
+if [[ "${OSTYPE:-}" == "msys"* || "${OSTYPE:-}" == "cygwin"* ]]; then
+  NATIVE_TARGET_DIR="$IMAGE_DIR/bin"
+fi
+mkdir -p "$NATIVE_TARGET_DIR"
+
+copied_native=0
+shopt -s nullglob
+for dir in "${JAVAFX_NATIVE_DIRS[@]}"; do
+  for f in "$dir"/*.dylib "$dir"/*.so "$dir"/*.so.* "$dir"/*.dll; do
+    cp -f "$f" "$NATIVE_TARGET_DIR/"
+    copied_native=1
+  done
+done
+shopt -u nullglob
+
+if [[ -f "$JAVAFX_LIB_DIR/javafx.properties" ]]; then
+  cp -f "$JAVAFX_LIB_DIR/javafx.properties" "$IMAGE_DIR/lib/"
+  copied_native=1
+fi
+
+if [[ "$copied_native" -eq 0 ]]; then
+  echo "Warning: no JavaFX native libraries were copied from $JAVAFX_SDK_DIR"
+fi
 
 JPACKAGE_ARGS=(
   --type "$PACKAGE_TYPE"
