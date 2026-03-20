@@ -34,6 +34,29 @@ if [[ ! -x "$JAVAC" || ! -x "$JPACKAGE" ]]; then
   exit 1
 fi
 
+JAVAFX_LIB_DIR="${JAVAFX_LIB_DIR:-}"
+if [[ -z "$JAVAFX_LIB_DIR" ]]; then
+  if [[ -d "$JAVAFX_SDK_DIR" ]]; then
+    JAVAFX_SDK_DIR="$(cd "$JAVAFX_SDK_DIR" && pwd)"
+  fi
+  if [[ -d "$JAVAFX_SDK_DIR/lib" ]]; then
+    JAVAFX_LIB_DIR="$JAVAFX_SDK_DIR/lib"
+  elif [[ -f "$JAVAFX_SDK_DIR/javafx.properties" ]]; then
+    JAVAFX_LIB_DIR="$JAVAFX_SDK_DIR"
+  else
+    found="$(find "$JAVAFX_SDK_DIR" -maxdepth 4 -type f -name "javafx.base.jar" -print -quit 2>/dev/null || true)"
+    if [[ -n "$found" ]]; then
+      JAVAFX_LIB_DIR="$(cd "$(dirname "$found")" && pwd)"
+    fi
+  fi
+fi
+
+if [[ -z "$JAVAFX_LIB_DIR" || ! -f "$JAVAFX_LIB_DIR/javafx.base.jar" ]]; then
+  echo "JavaFX lib dir not found. JAVAFX_SDK_DIR=$JAVAFX_SDK_DIR"
+  echo "Set JAVAFX_LIB_DIR to the folder containing javafx.base.jar."
+  exit 1
+fi
+
 MODS_DIR="$BUILD_DIR/mods"
 MLIB_DIR="$BUILD_DIR/mlib"
 IMAGE_DIR="$BUILD_DIR/image"
@@ -59,15 +82,16 @@ module $MODULE_NAME {
 EOF
 
 "$JAVAC" \
+  -encoding UTF-8 \
   --module-source-path "$TMP_SRC" \
-  --module-path "$JAVAFX_SDK_DIR/lib" \
+  --module-path "$JAVAFX_LIB_DIR" \
   -d "$MODS_DIR" \
   $(find "$TMP_SRC" -name "*.java")
 
 "$JAR" --create --file "$MLIB_DIR/$APP_NAME.jar" -C "$MODS_DIR/$MODULE_NAME" .
 
 "$JLINK" \
-  --module-path "$MLIB_DIR:$JAVA_HOME/jmods:$JAVAFX_SDK_DIR/lib" \
+  --module-path "$MLIB_DIR:$JAVA_HOME/jmods:$JAVAFX_LIB_DIR" \
   --add-modules "$MODULE_NAME,javafx.controls,javafx.fxml,javafx.graphics" \
   --output "$IMAGE_DIR" \
   --launcher "$APP_NAME=$MODULE_NAME/$MAIN_CLASS" \
