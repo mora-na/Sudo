@@ -12,7 +12,7 @@ MODULE_NAME="${MODULE_NAME:-com.sudo.app}"
 MAIN_CLASS="${MAIN_CLASS:-com.sudo.Main}"
 PACKAGE_TYPE="${PACKAGE_TYPE:?PACKAGE_TYPE is required}"
 
-JAVAFX_SDK_DIR="${JAVAFX_SDK_DIR:?JAVAFX_SDK_DIR is required}"
+JAVAFX_SDK_DIR="${JAVAFX_SDK_DIR:-}"
 PACKAGE_ICON="${PACKAGE_ICON:-}"
 PACKAGE_VENDOR="${PACKAGE_VENDOR:-Panpan}"
 PACKAGE_DESCRIPTION="${PACKAGE_DESCRIPTION:-Sudoku Game}"
@@ -36,24 +36,36 @@ fi
 
 JAVAFX_LIB_DIR="${JAVAFX_LIB_DIR:-}"
 if [[ -z "$JAVAFX_LIB_DIR" ]]; then
-  if [[ -d "$JAVAFX_SDK_DIR" ]]; then
+  if [[ -n "$JAVAFX_SDK_DIR" && -d "$JAVAFX_SDK_DIR" ]]; then
     JAVAFX_SDK_DIR="$(cd "$JAVAFX_SDK_DIR" && pwd)"
+    if [[ -d "$JAVAFX_SDK_DIR/lib" ]]; then
+      JAVAFX_LIB_DIR="$JAVAFX_SDK_DIR/lib"
+    elif [[ -d "$JAVAFX_SDK_DIR/jmods" ]]; then
+      JAVAFX_LIB_DIR="$JAVAFX_SDK_DIR/jmods"
+    elif [[ -f "$JAVAFX_SDK_DIR/javafx.properties" ]]; then
+      JAVAFX_LIB_DIR="$JAVAFX_SDK_DIR"
+    else
+      found="$(find "$JAVAFX_SDK_DIR" -maxdepth 4 -type f \( -name "javafx.base.jar" -o -name "javafx.base.jmod" \) -print -quit 2>/dev/null || true)"
+      if [[ -n "$found" ]]; then
+        JAVAFX_LIB_DIR="$(cd "$(dirname "$found")" && pwd)"
+      fi
+    fi
   fi
-  if [[ -d "$JAVAFX_SDK_DIR/lib" ]]; then
-    JAVAFX_LIB_DIR="$JAVAFX_SDK_DIR/lib"
-  elif [[ -f "$JAVAFX_SDK_DIR/javafx.properties" ]]; then
-    JAVAFX_LIB_DIR="$JAVAFX_SDK_DIR"
-  else
-    found="$(find "$JAVAFX_SDK_DIR" -maxdepth 4 -type f -name "javafx.base.jar" -print -quit 2>/dev/null || true)"
-    if [[ -n "$found" ]]; then
-      JAVAFX_LIB_DIR="$(cd "$(dirname "$found")" && pwd)"
+
+  if [[ -z "$JAVAFX_LIB_DIR" ]]; then
+    if [[ -f "$JAVA_HOME/jmods/javafx.base.jmod" ]]; then
+      JAVAFX_LIB_DIR="$JAVA_HOME/jmods"
+      JAVAFX_SDK_DIR="${JAVAFX_SDK_DIR:-$JAVA_HOME}"
+    elif [[ -f "$JAVA_HOME/lib/javafx.base.jar" ]]; then
+      JAVAFX_LIB_DIR="$JAVA_HOME/lib"
+      JAVAFX_SDK_DIR="${JAVAFX_SDK_DIR:-$JAVA_HOME}"
     fi
   fi
 fi
 
-if [[ -z "$JAVAFX_LIB_DIR" || ! -f "$JAVAFX_LIB_DIR/javafx.base.jar" ]]; then
+if [[ -z "$JAVAFX_LIB_DIR" || ( ! -f "$JAVAFX_LIB_DIR/javafx.base.jar" && ! -f "$JAVAFX_LIB_DIR/javafx.base.jmod" ) ]]; then
   echo "JavaFX lib dir not found. JAVAFX_SDK_DIR=$JAVAFX_SDK_DIR"
-  echo "Set JAVAFX_LIB_DIR to the folder containing javafx.base.jar."
+  echo "Set JAVAFX_LIB_DIR to the folder containing javafx.base.jar or javafx.base.jmod."
   exit 1
 fi
 
@@ -107,6 +119,9 @@ fi
 if [[ -d "$JAVAFX_SDK_DIR/bin" ]]; then
   JAVAFX_NATIVE_DIRS+=("$JAVAFX_SDK_DIR/bin")
 fi
+if [[ -f "$JAVA_HOME/jmods/javafx.base.jmod" || -f "$JAVA_HOME/lib/javafx.base.jar" ]]; then
+  JAVAFX_NATIVE_DIRS+=("$JAVA_HOME/bin")
+fi
 
 NATIVE_TARGET_DIR="$IMAGE_DIR/lib"
 if [[ "${OSTYPE:-}" == "msys"* || "${OSTYPE:-}" == "cygwin"* ]]; then
@@ -124,8 +139,15 @@ for dir in "${JAVAFX_NATIVE_DIRS[@]}"; do
 done
 shopt -u nullglob
 
+mkdir -p "$IMAGE_DIR/lib"
 if [[ -f "$JAVAFX_LIB_DIR/javafx.properties" ]]; then
   cp -f "$JAVAFX_LIB_DIR/javafx.properties" "$IMAGE_DIR/lib/"
+  copied_native=1
+elif [[ -f "$JAVA_HOME/lib/javafx.properties" ]]; then
+  cp -f "$JAVA_HOME/lib/javafx.properties" "$IMAGE_DIR/lib/"
+  copied_native=1
+elif [[ -n "$JAVAFX_SDK_DIR" && -f "$JAVAFX_SDK_DIR/lib/javafx.properties" ]]; then
+  cp -f "$JAVAFX_SDK_DIR/lib/javafx.properties" "$IMAGE_DIR/lib/"
   copied_native=1
 fi
 
